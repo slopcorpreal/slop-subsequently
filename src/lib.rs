@@ -111,7 +111,6 @@ where
 
 pub async fn scan_and_read_tags(dir: &Path, tx: mpsc::Sender<Track>) -> usize {
     let mut files_seen = 0usize;
-    let mut tasks = Vec::new();
 
     for entry in WalkDir::new(dir).into_iter().filter_map(Result::ok) {
         if !entry.file_type().is_file() {
@@ -125,31 +124,25 @@ pub async fn scan_and_read_tags(dir: &Path, tx: mpsc::Sender<Track>) -> usize {
         }
 
         let path = entry.path().to_path_buf();
-        let tx_clone = tx.clone();
+        let mut title = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_string());
 
-        tasks.push(tokio::spawn(async move {
-            let mut title = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string());
+        if title.as_deref() == Some("") {
+            title = None;
+        }
 
-            if title.as_deref() == Some("") {
-                title = None;
-            }
+        let track = Track {
+            path,
+            title,
+            artist: None,
+            acoustid: None,
+        };
 
-            let track = Track {
-                path,
-                title,
-                artist: None,
-                acoustid: None,
-            };
-
-            let _ = tx_clone.send(track).await;
-        }));
-    }
-
-    for task in tasks {
-        let _ = task.await;
+        if tx.send(track).await.is_err() {
+            break;
+        }
     }
 
     drop(tx);
@@ -160,10 +153,9 @@ pub fn is_supported_audio_file(path: &Path) -> bool {
     path.extension()
         .and_then(|ext| ext.to_str())
         .map(|ext| {
-            matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "mp3" | "flac" | "ogg" | "m4a" | "wav" | "aac"
-            )
+            ["mp3", "flac", "ogg", "m4a", "wav", "aac"]
+                .iter()
+                .any(|supported| ext.eq_ignore_ascii_case(supported))
         })
         .unwrap_or(false)
 }
@@ -234,5 +226,14 @@ mod tests {
         assert_eq!(summary.files_seen, 3);
         assert_eq!(summary.tracks_imported, 2);
         assert_eq!(summary.batches_written, 2);
+    }
+
+    #[tokio::test]
+    async fn import_pipeline_rejects_zero_batch_size() {
+        let dir = tempdir().expect("temp dir");
+        fs::write(dir.path().join("one.mp3"), b"dummy").expect("write one");
+
+        let result = run_import(dir.path(), 0).await;
+        assert!(result.is_err());
     }
 }
