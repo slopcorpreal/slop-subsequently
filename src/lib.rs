@@ -26,12 +26,7 @@ pub async fn run_import(dir: &Path, batch_size: usize) -> Result<ImportSummary, 
     if batch_size == 0 {
         return Err("batch size must be greater than zero".to_string());
     }
-    if !dir.exists() {
-        return Err(format!("directory does not exist: {}", dir.display()));
-    }
-    if !dir.is_dir() {
-        return Err(format!("not a directory: {}", dir.display()));
-    }
+    validate_directory(dir)?;
 
     let (scan_tx, scan_rx) = mpsc::channel(256);
     let (fp_tx, fp_rx) = mpsc::channel(256);
@@ -206,12 +201,7 @@ pub async fn process_batches(mut rx: mpsc::Receiver<Track>, batch_size: usize) -
 }
 
 pub fn audio_library_signature(dir: &Path) -> Result<u64, String> {
-    if !dir.exists() {
-        return Err(format!("directory does not exist: {}", dir.display()));
-    }
-    if !dir.is_dir() {
-        return Err(format!("not a directory: {}", dir.display()));
-    }
+    validate_directory(dir)?;
 
     let mut hasher = DefaultHasher::new();
     let mut tracks = Vec::new();
@@ -245,6 +235,17 @@ pub fn audio_library_signature(dir: &Path) -> Result<u64, String> {
     }
 
     Ok(hasher.finish())
+}
+
+fn validate_directory(dir: &Path) -> Result<(), String> {
+    if !dir.exists() {
+        return Err(format!("directory does not exist: {}", dir.display()));
+    }
+    if !dir.is_dir() {
+        return Err(format!("not a directory: {}", dir.display()));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]

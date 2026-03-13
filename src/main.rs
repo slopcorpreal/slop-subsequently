@@ -110,7 +110,6 @@ fn parse_directory_arg(raw: &str) -> Result<PathBuf, String> {
     if !dir.is_dir() {
         return Err(format!("not a directory: {raw}"));
     }
-    std::fs::read_dir(dir).map_err(|e| format!("directory cannot be read: {e}"))?;
 
     std::fs::canonicalize(dir).map_err(|e| format!("failed to resolve directory path: {e}"))
 }
