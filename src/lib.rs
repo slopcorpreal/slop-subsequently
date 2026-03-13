@@ -2,6 +2,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
 use tokio::sync::{Mutex, mpsc};
 use walkdir::WalkDir;
@@ -198,6 +199,41 @@ pub async fn process_batches(mut rx: mpsc::Receiver<Track>, batch_size: usize) -
     (tracks_imported, batches_written)
 }
 
+pub fn audio_library_signature(dir: &Path) -> Result<u64, String> {
+    let mut hasher = DefaultHasher::new();
+    let mut tracks = Vec::new();
+
+    for entry in WalkDir::new(dir).into_iter().filter_map(Result::ok) {
+        if !entry.file_type().is_file() || !is_supported_audio_file(entry.path()) {
+            continue;
+        }
+
+        tracks.push(entry.path().to_path_buf());
+    }
+
+    tracks.sort();
+
+    for path in tracks {
+        path.hash(&mut hasher);
+
+        let metadata = path
+            .metadata()
+            .map_err(|e| format!("failed to read metadata for {}: {e}", path.display()))?;
+        metadata.len().hash(&mut hasher);
+
+        let modified = metadata
+            .modified()
+            .map_err(|e| format!("failed to read mtime for {}: {e}", path.display()))?;
+        let modified = modified
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| format!("invalid mtime for {}: {e}", path.display()))?;
+        modified.as_secs().hash(&mut hasher);
+        modified.subsec_nanos().hash(&mut hasher);
+    }
+
+    Ok(hasher.finish())
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -205,7 +241,7 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{is_supported_audio_file, run_import};
+    use super::{audio_library_signature, is_supported_audio_file, run_import};
 
     #[test]
     fn supported_audio_extensions_are_detected_case_insensitively() {
@@ -235,5 +271,21 @@ mod tests {
 
         let result = run_import(dir.path(), 0).await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn audio_library_signature_tracks_supported_audio_changes_only() {
+        let dir = tempdir().expect("temp dir");
+        fs::write(dir.path().join("one.mp3"), b"dummy").expect("write one");
+
+        let baseline = audio_library_signature(dir.path()).expect("signature");
+
+        fs::write(dir.path().join("notes.txt"), b"text").expect("write note");
+        let after_non_audio = audio_library_signature(dir.path()).expect("signature");
+        assert_eq!(baseline, after_non_audio);
+
+        fs::write(dir.path().join("two.flac"), b"dummy").expect("write two");
+        let after_new_audio = audio_library_signature(dir.path()).expect("signature");
+        assert_ne!(baseline, after_new_audio);
     }
 }

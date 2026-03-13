@@ -18,7 +18,7 @@ cargo run -- import <DIR>
 cargo run -- watch <DIR>
 ```
 
-`watch` is currently a placeholder command to reserve the interface for future daemon support.
+`watch` now runs an initial import and then polls the directory every 2 seconds, triggering a new import when supported audio files are added, removed, or modified.
 
 ## Test
 
