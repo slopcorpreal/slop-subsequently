@@ -14,8 +14,9 @@ This initial scaffold focuses on a concurrent import pipeline skeleton:
 ## Usage
 
 ```bash
-cargo run -- import <DIR>
+cargo run -- import <DIR> [BATCH_SIZE]
 cargo run -- watch <DIR>
+cargo run -- --help
 ```
 
 `watch` now runs an initial import and then polls the directory every 2 seconds, triggering a new import when supported audio files are added, removed, or modified.

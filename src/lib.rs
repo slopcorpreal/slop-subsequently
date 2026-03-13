@@ -26,6 +26,7 @@ pub async fn run_import(dir: &Path, batch_size: usize) -> Result<ImportSummary, 
     if batch_size == 0 {
         return Err("batch size must be greater than zero".to_string());
     }
+    validate_directory(dir)?;
 
     let (scan_tx, scan_rx) = mpsc::channel(256);
     let (fp_tx, fp_rx) = mpsc::channel(256);
@@ -200,6 +201,8 @@ pub async fn process_batches(mut rx: mpsc::Receiver<Track>, batch_size: usize) -
 }
 
 pub fn audio_library_signature(dir: &Path) -> Result<u64, String> {
+    validate_directory(dir)?;
+
     let mut hasher = DefaultHasher::new();
     let mut tracks = Vec::new();
 
@@ -232,6 +235,17 @@ pub fn audio_library_signature(dir: &Path) -> Result<u64, String> {
     }
 
     Ok(hasher.finish())
+}
+
+fn validate_directory(dir: &Path) -> Result<(), String> {
+    if !dir.exists() {
+        return Err(format!("directory does not exist: {}", dir.display()));
+    }
+    if !dir.is_dir() {
+        return Err(format!("not a directory: {}", dir.display()));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -273,6 +287,14 @@ mod tests {
         assert!(result.is_err());
     }
 
+    #[tokio::test]
+    async fn import_pipeline_rejects_missing_directory() {
+        let base = tempdir().expect("temp dir");
+        let missing = base.path().join("missing");
+        let result = run_import(&missing, 1).await;
+        assert!(result.is_err());
+    }
+
     #[test]
     fn audio_library_signature_tracks_supported_audio_changes_only() {
         let dir = tempdir().expect("temp dir");
@@ -287,5 +309,13 @@ mod tests {
         fs::write(dir.path().join("two.flac"), b"dummy").expect("write two");
         let after_new_audio = audio_library_signature(dir.path()).expect("signature");
         assert_ne!(baseline, after_new_audio);
+    }
+
+    #[test]
+    fn audio_library_signature_rejects_missing_directory() {
+        let base = tempdir().expect("temp dir");
+        let missing = base.path().join("missing");
+        let result = audio_library_signature(&missing);
+        assert!(result.is_err());
     }
 }
