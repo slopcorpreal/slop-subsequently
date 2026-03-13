@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 #[tokio::main]
 async fn main() {
@@ -34,10 +35,37 @@ async fn run() -> Result<(), String> {
                 .next()
                 .ok_or_else(|| "missing directory argument for watch command".to_string())?;
             let dir = parse_directory_arg(&dir)?;
+
+            println!("watching {} for supported audio changes", dir.display());
+            println!("press Ctrl+C to stop");
+
+            let initial = radish::run_import(&dir, 1000).await?;
             println!(
-                "radish watch is a placeholder in this bootstrap build. Monitoring is not yet active for: {}",
-                dir.display()
+                "imported {} tracks from {} files in {} batch(es)",
+                initial.tracks_imported, initial.files_seen, initial.batches_written
             );
+
+            let mut previous_signature = radish::audio_library_signature(&dir)?;
+            loop {
+                tokio::select! {
+                    result = tokio::signal::ctrl_c() => {
+                        result.map_err(|e| format!("failed to listen for Ctrl+C: {e}"))?;
+                        println!("stopping watch mode");
+                        break;
+                    }
+                    _ = tokio::time::sleep(Duration::from_secs(2)) => {
+                        let current_signature = radish::audio_library_signature(&dir)?;
+                        if current_signature != previous_signature {
+                            let summary = radish::run_import(&dir, 1000).await?;
+                            println!(
+                                "imported {} tracks from {} files in {} batch(es)",
+                                summary.tracks_imported, summary.files_seen, summary.batches_written
+                            );
+                            previous_signature = current_signature;
+                        }
+                    }
+                }
+            }
             Ok(())
         }
         _ => {
