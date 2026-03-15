@@ -164,17 +164,38 @@ pub fn is_supported_audio_file(path: &Path) -> bool {
 
 pub async fn fingerprint_track(mut track: Track) -> Track {
     let mut hasher = DefaultHasher::new();
-    track.path.hash(&mut hasher);
+    match std::fs::read(&track.path) {
+        Ok(bytes) => bytes.hash(&mut hasher),
+        Err(_) => track.path.hash(&mut hasher),
+    }
     track.acoustid = Some(format!("acoustid:{:016x}", hasher.finish()));
     track
 }
 
 pub async fn match_musicbrainz_async(mut track: Track) -> Track {
+    if let Some(stem) = track.path.file_stem().and_then(|s| s.to_str())
+        && let Some((artist, title)) = parse_artist_title(stem)
+    {
+        track.artist = Some(artist);
+        track.title = Some(title);
+    }
+
     if track.artist.is_none() {
         track.artist = Some("Unknown Artist".to_string());
     }
 
     track
+}
+
+fn parse_artist_title(stem: &str) -> Option<(String, String)> {
+    let (artist, title) = stem.split_once(" - ")?;
+    let artist = artist.trim();
+    let title = title.trim();
+    if artist.is_empty() || title.is_empty() {
+        return None;
+    }
+
+    Some((artist.to_string(), title.to_string()))
 }
 
 pub async fn process_batches(mut rx: mpsc::Receiver<Track>, batch_size: usize) -> (usize, usize) {
@@ -255,7 +276,10 @@ mod tests {
 
     use tempfile::tempdir;
 
-    use super::{audio_library_signature, is_supported_audio_file, run_import};
+    use super::{
+        Track, audio_library_signature, fingerprint_track, is_supported_audio_file,
+        match_musicbrainz_async, run_import,
+    };
 
     #[test]
     fn supported_audio_extensions_are_detected_case_insensitively() {
@@ -317,5 +341,46 @@ mod tests {
         let missing = base.path().join("missing");
         let result = audio_library_signature(&missing);
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn fingerprint_track_is_content_based() {
+        let dir = tempdir().expect("temp dir");
+        let first = dir.path().join("one.mp3");
+        let second = dir.path().join("two.mp3");
+        fs::write(&first, b"same-content").expect("write first");
+        fs::write(&second, b"same-content").expect("write second");
+
+        let first_track = Track {
+            path: first,
+            title: None,
+            artist: None,
+            acoustid: None,
+        };
+        let second_track = Track {
+            path: second,
+            title: None,
+            artist: None,
+            acoustid: None,
+        };
+
+        let first_fp = fingerprint_track(first_track).await.acoustid;
+        let second_fp = fingerprint_track(second_track).await.acoustid;
+
+        assert_eq!(first_fp, second_fp);
+    }
+
+    #[tokio::test]
+    async fn metadata_enrichment_derives_artist_and_title_from_filename() {
+        let track = Track {
+            path: Path::new("/tmp/Radiohead - Creep.flac").to_path_buf(),
+            title: None,
+            artist: None,
+            acoustid: None,
+        };
+
+        let enriched = match_musicbrainz_async(track).await;
+        assert_eq!(enriched.artist.as_deref(), Some("Radiohead"));
+        assert_eq!(enriched.title.as_deref(), Some("Creep"));
     }
 }
