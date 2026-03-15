@@ -163,18 +163,29 @@ pub fn is_supported_audio_file(path: &Path) -> bool {
 }
 
 pub async fn fingerprint_track(mut track: Track) -> Track {
+    let bytes = match tokio::fs::read(&track.path).await {
+        Ok(bytes) => bytes,
+        Err(err) => {
+            let mut hasher = DefaultHasher::new();
+            track.path.hash(&mut hasher);
+            err.kind().hash(&mut hasher);
+            track.acoustid = Some(format!("acoustid:unreadable:{:016x}", hasher.finish()));
+            return track;
+        }
+    };
+
     let mut hasher = DefaultHasher::new();
-    match std::fs::read(&track.path) {
-        Ok(bytes) => bytes.hash(&mut hasher),
-        Err(_) => track.path.hash(&mut hasher),
-    }
+    bytes.hash(&mut hasher);
     track.acoustid = Some(format!("acoustid:{:016x}", hasher.finish()));
     track
 }
 
 pub async fn match_musicbrainz_async(mut track: Track) -> Track {
-    if let Some(stem) = track.path.file_stem().and_then(|s| s.to_str())
-        && let Some((artist, title)) = parse_artist_title(stem)
+    if let Some((artist, title)) = track
+        .path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .and_then(parse_artist_title)
     {
         track.artist = Some(artist);
         track.title = Some(title);
@@ -372,8 +383,9 @@ mod tests {
 
     #[tokio::test]
     async fn metadata_enrichment_derives_artist_and_title_from_filename() {
+        let dir = tempdir().expect("temp dir");
         let track = Track {
-            path: Path::new("/tmp/Radiohead - Creep.flac").to_path_buf(),
+            path: dir.path().join("Radiohead - Creep.flac"),
             title: None,
             artist: None,
             acoustid: None,
@@ -382,5 +394,21 @@ mod tests {
         let enriched = match_musicbrainz_async(track).await;
         assert_eq!(enriched.artist.as_deref(), Some("Radiohead"));
         assert_eq!(enriched.title.as_deref(), Some("Creep"));
+    }
+
+    #[tokio::test]
+    async fn fingerprint_track_marks_unreadable_files() {
+        let dir = tempdir().expect("temp dir");
+        let missing = dir.path().join("missing.mp3");
+        let track = Track {
+            path: missing,
+            title: None,
+            artist: None,
+            acoustid: None,
+        };
+
+        let fingerprinted = fingerprint_track(track).await;
+        let acoustid = fingerprinted.acoustid.expect("acoustid should be set");
+        assert!(acoustid.starts_with("acoustid:unreadable:"));
     }
 }
