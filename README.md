@@ -4,12 +4,12 @@ Radish is a Rust-first bootstrap for a high-throughput music library importer in
 
 ## Current scope
 
-This initial scaffold focuses on a concurrent import pipeline skeleton:
+This initial scaffold focuses on a concurrent import pipeline:
 
 - Stage A: walk a directory and detect supported audio files
-- Stage B: generate deterministic placeholder "acoustid" fingerprints concurrently
-- Stage C: enrich metadata concurrently (placeholder MusicBrainz matching)
-- Stage D: batch records for storage (batch write simulation)
+- Stage B: generate deterministic content-based "acoustid" fingerprints concurrently
+- Stage C: enrich metadata concurrently (derive artist/title from `Artist - Title` filenames)
+- Stage D: batch records for storage accounting
 
 ## Usage
 
